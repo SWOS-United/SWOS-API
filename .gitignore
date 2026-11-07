@@ -1,0 +1,6 @@
+# Secrets: never in git (README.md)
+*secrets*.h
+!*secrets*.sample.h
+*config*.php
+!*config*.sample.php
+.env
