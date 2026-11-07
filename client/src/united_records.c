@@ -623,6 +623,85 @@ int32_t UnitedRecords_ScnDownload(const char *file, unsigned char **data, uint32
     return *data != NULL;
 }
 
+/* ---- SWOS Galore ---- */
+
+/* "1, nestoroide, COMBO.HIL, "NICE HEAD COMBO", 2026-03-06-16-46-23, 2, 5.00, 7, 0": the comment
+ * quoted (it may hold ", "), the rest bare */
+int32_t UnitedRecords_GaloreChart(const char *yearMonth, char *out, uint32_t cap)
+{
+    char url[512];
+    HttpsReply r;
+    char *p = out;
+    uint32_t left = cap;
+    if (cap)
+        out[0] = 0;
+    if (yearMonth && yearMonth[0])
+        snprintf(url, sizeof url,
+                 "%s/galoreapi_v15.php?conn_mode=1&option=download_all_hil_data_with_rankings_year_month&year_month=%.7s",
+                 PROJECT_RECORDS_API, yearMonth);
+    else
+        snprintf(url, sizeof url, "%s/galoreapi_v15.php?conn_mode=1&option=download_all_hil_data_with_rankings",
+                 PROJECT_RECORDS_API);
+    if (!get(url, &r))
+        return 0;
+    for (char *line = r.body; line && *line;) {
+        char *next = strchr(line, '\n');
+        if (next)
+            *next++ = 0;
+        char *q1 = strchr(line, '"'), *q2 = q1 ? strrchr(line, '"') : NULL;
+        if (q1 && q2 > q1) {
+            char *head[3], *tail[5], comment[160];
+            *q1 = 0;
+            *q2 = 0;
+            snprintf(comment, sizeof comment, "%s", q1 + 1);
+            for (char *c = comment + strlen(comment); c > comment && c[-1] == ' ';)
+                *--c = 0;
+            for (char *c = comment; *c; c++)
+                if (*c == '\t')
+                    *c = ' ';
+            const int32_t nh = split_fields(line, head, 3);         /* rank, user, file, "" */
+            char *rest = q2 + 1;
+            while (*rest == ',' || *rest == ' ')
+                rest++;
+            const int32_t nt = split_fields(rest, tail, 5);         /* date, scene, rate, raters, 0 */
+            if (nh >= 3 && nt >= 4) {
+                const char *d = tail[0];                            /* 2026-03-06-16-46-23 */
+                char date[16] = "";
+                if (strlen(d) >= 10)
+                    snprintf(date, sizeof date, "%.2s.%.2s.%.2s", d + 2, d + 5, d + 8);
+                for (char *c = head[2]; *c; c++)
+                    if (*c == ',')
+                        *c = 0;
+                put_text(&p, &left, "%d\t%s\t%s\t%s\t%s\t%d\t%s\t%d\n", atoi(head[0]), head[1], head[2], comment, date,
+                         atoi(tail[1]), tail[2], atoi(tail[3]));
+            }
+        }
+        line = next;
+    }
+    Https_Free(&r);
+    return 1;
+}
+
+int32_t UnitedRecords_GaloreDownload(const char *user, const char *file, unsigned char **data, uint32_t *size)
+{
+    char url[640], u[160], f[300];
+    HttpsReply r;
+    *data = NULL;
+    *size = 0;
+    Https_Escape(user, u, sizeof u);
+    Https_Escape(file, f, sizeof f);
+    snprintf(url, sizeof url, "%s/highlights/%s/%s", PROJECT_RECORDS_API, u, f);
+    if (!get(url, &r))
+        return 0;
+    *data = (unsigned char *)malloc(r.length ? r.length : 1);
+    if (*data) {
+        memcpy(*data, r.body, r.length);
+        *size = r.length;
+    }
+    Https_Free(&r);
+    return *data != NULL;
+}
+
 int32_t UnitedRecords_Difficulty(long yours, long theirs)
 {
     const long d = yours - theirs;      /* (SWOS 2020's game.cpp, its choose-the-teams speedrun) */

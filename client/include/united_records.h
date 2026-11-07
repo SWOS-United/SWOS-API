@@ -81,6 +81,13 @@ int32_t UnitedRecords_ScnList(int32_t byName, char *out, uint32_t cap);
 int32_t UnitedRecords_ScnInfo(char *out, uint32_t cap);
 int32_t UnitedRecords_ScnDownload(const char *file, unsigned char **data, uint32_t *size);
 
+/* ---- SWOS Galore: the highlights shared on SWOS 2020's site (reads only) ----
+ * Chart: download_all_hil_data_with_rankings (all time) or ..._year_month ("YYYY-MM"):
+ * "<rank>\t<user>\t<file>\t<comment>\t<date YY.MM.DD>\t<scene, 0 all>\t<average rate>\t<raters>"
+ * a line, best first. Download: a highlight's .HIL (*data malloc'd: free it). 1 done, 0 not. */
+int32_t UnitedRecords_GaloreChart(const char *yearMonth, char *out, uint32_t cap);
+int32_t UnitedRecords_GaloreDownload(const char *user, const char *file, unsigned char **data, uint32_t *size);
+
 /* SWOS 2020's difficulty from the teams' skill points (yours - theirs), and its game_style from
  * OpenSWOS's style name ("AMIGA", "DOS", "XBOX"). */
 int32_t UnitedRecords_Difficulty(long yours, long theirs);
