@@ -8,6 +8,7 @@
 #include "https_client.h"
 #include "project_identity.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -403,6 +404,146 @@ int32_t UnitedRecords_SpeedrunRun(const UnitedSpeedrun *run, char *line, uint32_
             snprintf(line, cap, "%s", top);
     }
     return 1;
+}
+
+/* ", "-separated fields of a line, in place: up to max, the count */
+static int32_t split_fields(char *line, char **f, int32_t max)
+{
+    int32_t k = 0;
+    for (char *p = line; p && k < max; k++) {
+        f[k] = p;
+        p = strstr(p, ", ");
+        if (p) {
+            *p = 0;
+            p += 2;
+        }
+    }
+    return k;
+}
+
+/* YY.MM.DD from a replay's name: "<user>-2026-1105-123605-auto.rpl" (SWOS 2020's: the 16
+ * characters 25 from its end) */
+static void file_date(const char *file, char *out, uint32_t cap)
+{
+    const size_t n = strlen(file);
+    if (n < 25) {
+        snprintf(out, cap, "-");
+        return;
+    }
+    const char *d = file + n - 25;      /* "2026-1105-123605" */
+    snprintf(out, cap, "%.2s.%.2s.%.2s", d + 2, d + 5, d + 7);
+}
+
+typedef void (*RowFn)(char **f, int32_t n, char **p, uint32_t *left);
+
+static int32_t each_row(const char *url, int32_t minFields, RowFn fn, char *out, uint32_t cap)
+{
+    HttpsReply r;
+    char *p = out;
+    uint32_t left = cap;
+    if (cap)
+        out[0] = 0;
+    if (!get(url, &r))
+        return 0;
+    for (char *line = r.body; line && *line;) {
+        char *next = strchr(line, '\n');
+        if (next)
+            *next++ = 0;
+        size_t len = strlen(line);
+        while (len && (line[len - 1] == '\r' || line[len - 1] == ' '))
+            line[--len] = 0;
+        char *f[20];
+        const int32_t n = split_fields(line, f, 20);
+        if (n >= minFields)
+            fn(f, n, &p, &left);
+        line = next;
+    }
+    Https_Free(&r);
+    return 1;
+}
+
+static void put_text(char **p, uint32_t *left, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
+static void put_text(char **p, uint32_t *left, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    const int n = vsnprintf(*p, *left, fmt, ap);
+    va_end(ap);
+    if (n > 0 && (uint32_t)n < *left) {
+        *p += n;
+        *left -= (uint32_t)n;
+    }
+}
+
+static void upper_name(const char *in, char *out, uint32_t cap)
+{
+    uint32_t i = 0;
+    for (; in[i] && i + 1 < cap; i++)
+        out[i] = (char)(in[i] >= 'a' && in[i] <= 'z' ? in[i] - 32 : in[i]);
+    out[i] = 0;
+}
+
+/* user, mode, difficulty, best, bestFile, rank, played, current, currentFile, bestFrames,
+ * currentFrames -- rank 0 an empty place */
+static void board_row(char **f, int32_t n, char **p, uint32_t *left)
+{
+    char date[16], user[40];
+    (void)n;
+    if (atoi(f[5]) == 0)
+        return;
+    file_date(f[4], date, sizeof date);
+    upper_name(f[0], user, sizeof user);
+    put_text(p, left, "%d\t%d\t%s\t%s\t%d\t%d\n", atoi(f[2]), atoi(f[5]), date, user, atoi(f[6]), atoi(f[9]));
+}
+
+int32_t UnitedRecords_SpeedrunBoard(int32_t style, int32_t target, char *out, uint32_t cap)
+{
+    char url[512];
+    snprintf(url, sizeof url, "%s/swosapi_v3.php?conn_mode=1&option=make_leaderboards_v3&game_style=%d&game_mode=%d",
+             PROJECT_RECORDS_API, (int)style, (int)target);
+    return each_row(url, 11, board_row, out, cap);
+}
+
+/* user, mode, difficulty, played, best, current, ranking, bestFile, currentFile, bStart, bStop,
+ * bElaps, cStart, cStop, cElaps, 0 */
+static void mine_row(char **f, int32_t n, char **p, uint32_t *left)
+{
+    (void)n;
+    put_text(p, left, "%d\t%d\t%d\t%d\t%d\t%d\n", atoi(f[1]), atoi(f[2]), atoi(f[3]), atoi(f[11]), atoi(f[14]),
+             atoi(f[6]));
+}
+
+int32_t UnitedRecords_SpeedrunMine(const char *user, int32_t style, char *out, uint32_t cap)
+{
+    char url[512], u[160];
+    Https_Escape(user, u, sizeof u);
+    snprintf(url, sizeof url, "%s/swosapi_v3.php?conn_mode=1&option=view_rows_v2&username=%s&game_style=%d",
+             PROJECT_RECORDS_API, u, (int)style);
+    return each_row(url, 15, mine_row, out, cap);
+}
+
+/* style, user, mode, difficulty, played, best, current, rank, bestFile, currentFile, frames */
+static void news_row(char **f, int32_t n, char **p, uint32_t *left)
+{
+    char date[16], user[40], rank[12];
+    (void)n;
+    if (!strcmp(f[1], "none"))
+        return;
+    file_date(f[9], date, sizeof date);
+    upper_name(f[1], user, sizeof user);
+    if (!strcmp(f[5], f[6]))            /* (the run is the player's best: its place) */
+        snprintf(rank, sizeof rank, "%d", atoi(f[7]));
+    else
+        snprintf(rank, sizeof rank, "X");
+    put_text(p, left, "%s\t%d\t%d\t%d\t%s\t%d\t%s\n", date, atoi(f[0]), atoi(f[2]), atoi(f[3]), user, atoi(f[10]),
+             rank);
+}
+
+int32_t UnitedRecords_SpeedrunNews(char *out, uint32_t cap)
+{
+    char url[512];
+    snprintf(url, sizeof url, "%s/swosapi_v3.php?conn_mode=1&option=view_news_current_v2", PROJECT_RECORDS_API);
+    return each_row(url, 11, news_row, out, cap);
 }
 
 int32_t UnitedRecords_Difficulty(long yours, long theirs)

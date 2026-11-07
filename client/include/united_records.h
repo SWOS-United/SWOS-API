@@ -59,6 +59,19 @@ typedef struct {
  * screen into line[cap] ("WORLD RANK 3   BEST 2.21 NAME"). 1 sent. */
 int32_t UnitedRecords_SpeedrunRun(const UnitedSpeedrun *run, char *line, uint32_t cap);
 
+/* The boards, as SWOS 2020's screens show them, as text lines into out[cap] (fields tab-separated;
+ * a time is its FRAMES at the style's rate, 99999 none; a date YY.MM.DD, from the replay's file
+ * name). 1 fetched, 0 not.
+ *   Board  (make_leaderboards_v3: a target's five difficulties, 100 places each)
+ *          "<difficulty>\t<rank>\t<date>\t<user>\t<played>\t<best frames>"
+ *   Mine   (view_rows_v2: the player's records at a style)
+ *          "<target>\t<difficulty>\t<played>\t<best frames>\t<last frames>\t<rank>"
+ *   News   (view_news_current_v2: the latest runs, everybody's)
+ *          "<date>\t<style>\t<target>\t<difficulty>\t<user>\t<frames>\t<rank, X not a best>" */
+int32_t UnitedRecords_SpeedrunBoard(int32_t style, int32_t target, char *out, uint32_t cap);
+int32_t UnitedRecords_SpeedrunMine(const char *user, int32_t style, char *out, uint32_t cap);
+int32_t UnitedRecords_SpeedrunNews(char *out, uint32_t cap);
+
 /* SWOS 2020's difficulty from the teams' skill points (yours - theirs), and its game_style from
  * OpenSWOS's style name ("AMIGA", "DOS", "XBOX"). */
 int32_t UnitedRecords_Difficulty(long yours, long theirs);
