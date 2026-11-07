@@ -42,53 +42,61 @@ static int32_t get(const char *url, HttpsReply *r)
 
 /* ---- the challenges ---- */
 
-static int32_t count_at(UnitedChallengeTally *t, const char *key, int32_t add)
+static int by_key_user(const void *a, const void *b)
 {
-    for (int32_t i = 0; i < t->numCounts; i++)
-        if (strcmp(t->counts[i].key, key) == 0)
-            return add ? (t->counts[i].players += add) : t->counts[i].players;
-    if (!add)
-        return 0;
-    if (t->numCounts == t->capCounts) {
-        const int32_t cap = t->capCounts ? t->capCounts * 2 : 256;
-        UnitedChallengeCount *more = (UnitedChallengeCount *)realloc(t->counts, (size_t)cap * sizeof *more);
+    const UnitedChallengeWins *x = (const UnitedChallengeWins *)a, *y = (const UnitedChallengeWins *)b;
+    const int k = strcmp(x->key, y->key);
+    return k ? k : strcmp(x->user, y->user);
+}
+
+static int32_t add_row(UnitedChallengeTally *t, const char *user, const char *key, int32_t wins)
+{
+    if (t->numRows == t->capRows) {
+        const int32_t cap = t->capRows ? t->capRows * 2 : 1024;
+        UnitedChallengeWins *more = (UnitedChallengeWins *)realloc(t->rows, (size_t)cap * sizeof *more);
         if (!more)
             return 0;
-        t->counts = more;
-        t->capCounts = cap;
+        t->rows = more;
+        t->capRows = cap;
     }
-    snprintf(t->counts[t->numCounts].key, sizeof t->counts[0].key, "%s", key);
-    t->counts[t->numCounts].players = add;
-    return t->counts[t->numCounts++].players;
+    UnitedChallengeWins *r = &t->rows[t->numRows++];
+    snprintf(r->user, sizeof r->user, "%s", user);
+    for (char *c = r->user; *c; c++)            /* (the server's names come in both cases) */
+        if (*c >= 'a' && *c <= 'z')
+            *c = (char)(*c - 32);
+    snprintf(r->key, sizeof r->key, "%s", key);
+    r->wins = wins;
+    return 1;
 }
 
-static void mine_add(UnitedChallengeTally *t, const char *key)
+/* Rows of one key are together (sorted): the first, and how many. */
+static int32_t key_rows(const UnitedChallengeTally *t, const char *key, int32_t *first)
 {
-    const size_t len = t->mine ? strlen(t->mine) : 0, k = strlen(key);
-    char *more = (char *)realloc(t->mine, len + k + 2);
-    if (!more)
-        return;
-    memcpy(more + len, key, k);
-    more[len + k] = '\n';
-    more[len + k + 1] = 0;
-    t->mine = more;
+    int32_t lo = 0, hi = t->numRows;
+    while (lo < hi) {
+        const int32_t mid = (lo + hi) / 2;
+        if (strcmp(t->rows[mid].key, key) < 0)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+    int32_t n = 0;
+    while (lo + n < t->numRows && !strcmp(t->rows[lo + n].key, key))
+        n++;
+    *first = lo;
+    return n;
 }
 
-static int32_t mine_has(const UnitedChallengeTally *t, const char *key)
-{
-    const size_t k = strlen(key);
-    for (const char *p = t->mine; p && (p = strstr(p, key)) != NULL; p++)
-        if ((p == t->mine || p[-1] == '\n') && p[k] == '\n')
-            return 1;
-    return 0;
-}
-
-/* galoreapi get_scenario_completed_ex: "<user>, <scenario>, <category>, 0" a line, every player's */
+/* galoreapi get_scenario_completed_ex: "<user>, <scenario>, <category>, 0" a line, a win each */
 int32_t UnitedRecords_ChallengeTally(const char *me, UnitedChallengeTally *out)
 {
     char url[512];
     HttpsReply r;
     memset(out, 0, sizeof *out);
+    snprintf(out->me, sizeof out->me, "%s", me ? me : "");
+    for (char *c = out->me; *c; c++)
+        if (*c >= 'a' && *c <= 'z')
+            *c = (char)(*c - 32);
     snprintf(url, sizeof url, "%s/galoreapi_v15.php?conn_mode=1&option=get_scenario_completed_ex",
              PROJECT_RECORDS_API);
     if (!get(url, &r))
@@ -111,39 +119,156 @@ int32_t UnitedRecords_ChallengeTally(const char *me, UnitedChallengeTally *out)
             *last = 0;
             char key[200];
             snprintf(key, sizeof key, "%s\t%s", last + 2, first + 2);
-            count_at(out, key, 1);
-            if (me && same_name(line, me) && !mine_has(out, key))
-                mine_add(out, key);
+            if (!add_row(out, line, key, 1))
+                break;
         }
         line = next;
     }
     Https_Free(&r);
-    if (!out->mine) {
-        out->mine = (char *)calloc(1, 1);
-        if (!out->mine)
-            return 0;
+    /* one row a player and challenge, their wins added up */
+    qsort(out->rows, (size_t)out->numRows, sizeof *out->rows, by_key_user);
+    int32_t w = 0;
+    for (int32_t i = 0; i < out->numRows; i++) {
+        if (w && !by_key_user(&out->rows[w - 1], &out->rows[i]))
+            out->rows[w - 1].wins += out->rows[i].wins;
+        else
+            out->rows[w++] = out->rows[i];
     }
+    out->numRows = w;
     return 1;
 }
 
 void UnitedRecords_FreeTally(UnitedChallengeTally *t)
 {
-    free(t->mine);
-    free(t->counts);
+    free(t->rows);
     memset(t, 0, sizeof *t);
 }
 
-int32_t UnitedRecords_TallyCount(const UnitedChallengeTally *t, const char *key)
+int32_t UnitedRecords_TallyPlayers(const UnitedChallengeTally *t, const char *key)
 {
-    return count_at((UnitedChallengeTally *)t, key, 0);
+    int32_t first;
+    return key_rows(t, key, &first);
+}
+
+int32_t UnitedRecords_TallyWins(const UnitedChallengeTally *t, const char *key, const char *user)
+{
+    int32_t first;
+    const int32_t n = key_rows(t, key, &first);
+    if (!user)
+        user = t->me;
+    for (int32_t i = 0; i < n; i++)
+        if (same_name(t->rows[first + i].user, user))
+            return t->rows[first + i].wins;
+    return 0;
+}
+
+static void put_line(char **p, uint32_t *left, const char *a, const char *b, int32_t number)
+{
+    int n = b ? snprintf(*p, *left, "%s\t%s\n", a, b) : snprintf(*p, *left, "%s\t%d\n", a, (int)number);
+    if (n > 0 && (uint32_t)n < *left) {
+        *p += n;
+        *left -= (uint32_t)n;
+    }
+}
+
+int32_t UnitedRecords_TallyMine(const UnitedChallengeTally *t, char *out, uint32_t cap)
+{
+    int32_t count = 0;
+    char *p = out;
+    uint32_t left = cap;
+    if (cap)
+        out[0] = 0;
+    for (int32_t i = 0; i < t->numRows; i++)
+        if (t->me[0] && same_name(t->rows[i].user, t->me)) {
+            int n = snprintf(p, left, "%s\n", t->rows[i].key);
+            if (n > 0 && (uint32_t)n < left) {
+                p += n;
+                left -= (uint32_t)n;
+            }
+            count++;
+        }
+    return count;
+}
+
+typedef struct { const char *user; int32_t n; } Ranked;
+static int by_count_name(const void *a, const void *b)
+{
+    const Ranked *x = (const Ranked *)a, *y = (const Ranked *)b;
+    return x->n != y->n ? (y->n > x->n ? 1 : -1) : strcmp(x->user, y->user);
+}
+
+int32_t UnitedRecords_TallyWinners(const UnitedChallengeTally *t, const char *key, char *out, uint32_t cap)
+{
+    int32_t first;
+    const int32_t n = key_rows(t, key, &first);
+    Ranked *r = n ? (Ranked *)malloc((size_t)n * sizeof *r) : NULL;
+    char *p = out;
+    uint32_t left = cap;
+    if (cap)
+        out[0] = 0;
+    if (!r)
+        return 0;
+    for (int32_t i = 0; i < n; i++) {
+        r[i].user = t->rows[first + i].user;
+        r[i].n = t->rows[first + i].wins;
+    }
+    qsort(r, (size_t)n, sizeof *r, by_count_name);
+    for (int32_t i = 0; i < n; i++)
+        put_line(&p, &left, r[i].user, NULL, r[i].n);
+    free(r);
+    return n;
+}
+
+static int by_user(const void *a, const void *b)
+{
+    return strcmp(((const Ranked *)a)->user, ((const Ranked *)b)->user);
+}
+
+int32_t UnitedRecords_TallyRanking(const UnitedChallengeTally *t, const char *category, char *out, uint32_t cap)
+{
+    const size_t cl = strlen(category);
+    Ranked *r = t->numRows ? (Ranked *)malloc((size_t)t->numRows * sizeof *r) : NULL;
+    int32_t n = 0, users = 0;
+    char *p = out;
+    uint32_t left = cap;
+    if (cap)
+        out[0] = 0;
+    if (!r)
+        return 0;
+    /* a row is one player's one challenge: the category's rows, counted a player */
+    for (int32_t i = 0; i < t->numRows; i++)
+        if (!strncmp(t->rows[i].key, category, cl) && t->rows[i].key[cl] == '\t') {
+            r[n].user = t->rows[i].user;
+            r[n++].n = 1;
+        }
+    qsort(r, (size_t)n, sizeof *r, by_user);
+    for (int32_t i = 0; i < n; i++) {
+        if (users && !strcmp(r[users - 1].user, r[i].user))
+            r[users - 1].n++;
+        else
+            r[users++] = r[i];
+    }
+    qsort(r, (size_t)users, sizeof *r, by_count_name);
+    for (int32_t i = 0; i < users; i++)
+        put_line(&p, &left, r[i].user, NULL, r[i].n);
+    free(r);
+    return users;
 }
 
 int32_t UnitedRecords_TallyAddMine(UnitedChallengeTally *t, const char *key)
 {
-    if (mine_has(t, key))
+    int32_t first;
+    const int32_t n = key_rows(t, key, &first);
+    if (!t->me[0])
         return 0;
-    count_at(t, key, 1);
-    mine_add(t, key);
+    for (int32_t i = 0; i < n; i++)
+        if (same_name(t->rows[first + i].user, t->me)) {
+            t->rows[first + i].wins++;
+            return 0;
+        }
+    if (!add_row(t, t->me, key, 1))
+        return 0;
+    qsort(t->rows, (size_t)t->numRows, sizeof *t->rows, by_key_user);
     return 1;
 }
 

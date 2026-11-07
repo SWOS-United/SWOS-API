@@ -17,21 +17,29 @@
 
 /* ---- the challenges ---- */
 
-/* Every player's beaten challenges, tallied: how many players have beaten each
- * ("<category>\t<name>" keys) and the ones `me` has, "<category>\t<name>\n" lines. */
-typedef struct { char key[200]; int32_t players; } UnitedChallengeCount;
+/* Every player's beaten challenges (get_scenario_completed_ex: a row a win), tallied: each
+ * player's wins of each challenge, a challenge known by its "<category>\t<name>" key. */
+typedef struct { char user[32]; char key[72]; int32_t wins; } UnitedChallengeWins;
 typedef struct {
-    char                 *mine;
-    UnitedChallengeCount *counts;
-    int32_t               numCounts, capCounts;
+    UnitedChallengeWins *rows;          /* sorted by key, then user */
+    int32_t              numRows, capRows;
+    char                 me[32];
 } UnitedChallengeTally;
 
-/* 1 fetched (*out filled; free it with UnitedRecords_FreeTally), 0 not. */
+/* 1 fetched (*out filled; free it with UnitedRecords_FreeTally), 0 not. `me` the player (or NULL). */
 int32_t UnitedRecords_ChallengeTally(const char *me, UnitedChallengeTally *out);
 void    UnitedRecords_FreeTally(UnitedChallengeTally *t);
-/* How many players have beaten `key`; and one more who has (a win just sent): 1 when `me` had
- * not had it already. */
-int32_t UnitedRecords_TallyCount(const UnitedChallengeTally *t, const char *key);
+/* How many players have beaten `key`; how many times `user` has (NULL: the tally's player). */
+int32_t UnitedRecords_TallyPlayers(const UnitedChallengeTally *t, const char *key);
+int32_t UnitedRecords_TallyWins(const UnitedChallengeTally *t, const char *key, const char *user);
+/* The player's beaten challenges: their keys, a line each, into out[cap]. The number. */
+int32_t UnitedRecords_TallyMine(const UnitedChallengeTally *t, char *out, uint32_t cap);
+/* Who has beaten `key`: "<user>\t<wins>" lines, the most wins first (SWOS 2020's ONLINE STATS). */
+int32_t UnitedRecords_TallyWinners(const UnitedChallengeTally *t, const char *key, char *out, uint32_t cap);
+/* A category's players by the challenges of it they have beaten, "<user>\t<count>" lines, the
+ * most first, then by name (SWOS 2020's rankUsersInCategory: SCENARIO COMPLETION). The number. */
+int32_t UnitedRecords_TallyRanking(const UnitedChallengeTally *t, const char *category, char *out, uint32_t cap);
+/* A win the player has just sent, counted here too: 1 when it was their first of `key`. */
 int32_t UnitedRecords_TallyAddMine(UnitedChallengeTally *t, const char *key);
 
 /* A challenge beaten, as SWOS 2020 records it (insert_new_scenario_record). 1 sent. */
