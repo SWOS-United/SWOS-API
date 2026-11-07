@@ -72,6 +72,15 @@ int32_t UnitedRecords_SpeedrunBoard(int32_t style, int32_t target, char *out, ui
 int32_t UnitedRecords_SpeedrunMine(const char *user, int32_t style, char *out, uint32_t cap);
 int32_t UnitedRecords_SpeedrunNews(char *out, uint32_t cap);
 
+/* ---- the shared custom challenges (SWOS 2020's .SCN: a 7z of challenge.ini and two .TEAM) ----
+ * List: list_scn_files, "<file>" a line ("ARGENTINA 3-0 BENIN BY BEVEREN.SCN"), by date (newest
+ * first) or name. Info: download_scenario_info, "<name>\t<nickname>\t<time>\t<start>\t<et/pen>
+ * \t<win>\t<level>" a line, the texts as SWOS 2020 shows them. Download: the file's bytes
+ * (*data malloc'd: free it). 1 done, 0 not. */
+int32_t UnitedRecords_ScnList(int32_t byName, char *out, uint32_t cap);
+int32_t UnitedRecords_ScnInfo(char *out, uint32_t cap);
+int32_t UnitedRecords_ScnDownload(const char *file, unsigned char **data, uint32_t *size);
+
 /* SWOS 2020's difficulty from the teams' skill points (yours - theirs), and its game_style from
  * OpenSWOS's style name ("AMIGA", "DOS", "XBOX"). */
 int32_t UnitedRecords_Difficulty(long yours, long theirs);

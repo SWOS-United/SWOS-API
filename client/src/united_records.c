@@ -546,6 +546,83 @@ int32_t UnitedRecords_SpeedrunNews(char *out, uint32_t cap)
     return each_row(url, 11, news_row, out, cap);
 }
 
+/* ---- the shared custom challenges ---- */
+
+static void scn_row(char **f, int32_t n, char **p, uint32_t *left)
+{
+    (void)n;
+    put_text(p, left, "%s\n", f[0]);
+}
+
+int32_t UnitedRecords_ScnList(int32_t byName, char *out, uint32_t cap)
+{
+    char url[512];
+    snprintf(url, sizeof url, "%s/galoreapi_v15.php?conn_mode=1&option=list_scn_files&sort_option=%s",
+             PROJECT_RECORDS_API, byName ? "name" : "date");
+    return each_row(url, 1, scn_row, out, cap);
+}
+
+/* "<name>", "<nickname>", "<time>", "<start>", "<et/pen>", "<win>", "<level>", 0 a line: quoted
+ * fields, which may hold ", " themselves */
+int32_t UnitedRecords_ScnInfo(char *out, uint32_t cap)
+{
+    char url[512];
+    HttpsReply r;
+    char *p = out;
+    uint32_t left = cap;
+    if (cap)
+        out[0] = 0;
+    snprintf(url, sizeof url, "%s/galoreapi_v15.php?conn_mode=1&option=download_scenario_info", PROJECT_RECORDS_API);
+    if (!get(url, &r))
+        return 0;
+    for (const char *line = r.body; line && *line;) {
+        const char *next = strchr(line, '\n');
+        const char *end = next ? next : line + strlen(line);
+        char f[7][128];
+        int32_t k = 0;
+        const char *c = line;
+        while (k < 7 && c < end) {
+            while (c < end && (*c == ' ' || *c == ','))
+                c++;
+            if (c >= end || *c != '"')
+                break;
+            const char *q = memchr(c + 1, '"', (size_t)(end - c - 1));
+            if (!q)
+                break;
+            snprintf(f[k], sizeof f[k], "%.*s", (int)(q - c - 1), c + 1);
+            for (char *t = f[k]; *t; t++)
+                if (*t == '\t')
+                    *t = ' ';
+            k++;
+            c = q + 1;
+        }
+        if (k == 7)
+            put_text(&p, &left, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", f[0], f[1], f[2], f[3], f[4], f[5], f[6]);
+        line = next ? next + 1 : NULL;
+    }
+    Https_Free(&r);
+    return 1;
+}
+
+int32_t UnitedRecords_ScnDownload(const char *file, unsigned char **data, uint32_t *size)
+{
+    char url[640], esc[300];
+    HttpsReply r;
+    *data = NULL;
+    *size = 0;
+    Https_Escape(file, esc, sizeof esc);
+    snprintf(url, sizeof url, "%s/challenges/custom/%s", PROJECT_RECORDS_API, esc);
+    if (!get(url, &r))
+        return 0;
+    *data = (unsigned char *)malloc(r.length ? r.length : 1);
+    if (*data) {
+        memcpy(*data, r.body, r.length);
+        *size = r.length;
+    }
+    Https_Free(&r);
+    return *data != NULL;
+}
+
 int32_t UnitedRecords_Difficulty(long yours, long theirs)
 {
     const long d = yours - theirs;      /* (SWOS 2020's game.cpp, its choose-the-teams speedrun) */
