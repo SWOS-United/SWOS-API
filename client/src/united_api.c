@@ -30,10 +30,15 @@ void United_SetSite(const char *name)
 
 int32_t United_NewSite(void) { return s_newSite; }
 
+void United_NewApiUrlTo(char *url, uint32_t cap, const char *path, const char *query)
+{
+    snprintf(url, cap, PROJECT_ACCOUNT_API "%s%s%s", path, query ? "?" : "", query ? query : "");
+}
+
 const char *United_NewApiUrl(const char *path, const char *query)
 {
     static char url[512];
-    snprintf(url, sizeof url, PROJECT_ACCOUNT_API "%s%s%s", path, query ? "?" : "", query ? query : "");
+    United_NewApiUrlTo(url, sizeof url, path, query);
     return url;
 }
 
@@ -192,10 +197,15 @@ int32_t United_JsonOk(const char *body, uint32_t len)
     return strcmp(v, "ok") == 0;
 }
 
+void United_ApiUrlTo(char *url, uint32_t cap, const char *view, const char *query)
+{
+    snprintf(url, cap, UNITED_API_BASE "&view=%s%s%s", view, query ? "&" : "", query ? query : "");
+}
+
 const char *United_ApiUrl(const char *view, const char *query)
 {
     static char url[512];
-    snprintf(url, sizeof url, UNITED_API_BASE "&view=%s%s%s", view, query ? "&" : "", query ? query : "");
+    United_ApiUrlTo(url, sizeof url, view, query);
     return url;
 }
 
@@ -344,6 +354,16 @@ static int32_t poll_new_site(HttpsReply *reply)
     return -1;
 }
 #endif
+
+/* After a log-in the site accepted, the caller's own reason to refuse it (SWOS United's ban list):
+ * the session forgotten -- id, key, password -- and `why` is United_LoginError's. */
+void United_LoginRefuse(const char *why)
+{
+    s_userId = 0;
+    s_apiKey[0] = 0;
+    memset(s_password, 0, sizeof s_password);
+    snprintf(s_error, sizeof s_error, "%s", why ? why : "");
+}
 
 int32_t United_LoginPoll(void)
 {

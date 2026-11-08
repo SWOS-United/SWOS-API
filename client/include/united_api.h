@@ -11,6 +11,7 @@
 /* The site's API: "https://sensiblesoccer.de/index.php?option=com_swosapi&view=<view>", and
  * "&<query>" after it when given. In a static buffer: copy it before the next call. */
 const char *United_ApiUrl(const char *view, const char *query);
+void        United_ApiUrlTo(char *url, uint32_t cap, const char *view, const char *query);  /* (any thread) */
 
 /* The API's replies are flat XML. The text of the first <tag>...</tag> in [p, end) into out
  * (entities &amp; &lt; &gt; &quot; &apos; decoded); the text just past it, or NULL with out
@@ -28,6 +29,7 @@ int32_t     United_NewSite(void);
 /* The new site's API: PROJECT_ACCOUNT_API "<path>", and "?<query>" after it when given. In a
  * static buffer, like United_ApiUrl. */
 const char *United_NewApiUrl(const char *path, const char *query);
+void        United_NewApiUrlTo(char *url, uint32_t cap, const char *path, const char *query);
 
 /* Its replies are JSON. A span of it: an object, an array or one value. */
 typedef struct { const char *p; int32_t n; } UnitedJson;
@@ -51,10 +53,12 @@ int32_t     United_JsonOk(const char *body, uint32_t len);
 void        United_LoginBegin(const char *user, const char *password);
 int32_t     United_LoginPoll(void);
 const char *United_LoginError(void);
+void        United_LoginRefuse(const char *why);   /* (a log-in the caller will not have) */
 /* The logged-in player (0 / "": nobody). */
 int32_t     United_UserId(void);
 const char *United_UserName(void);
 const char *United_Password(void);      /* (kept in memory for this player's own results only) */
 const char *United_ApiKey(void);        /* the new site's key for this session; "" none (old site) */
+
 
 #endif /* UNITED_API_H */
