@@ -493,7 +493,8 @@ static void board_row(char **f, int32_t n, char **p, uint32_t *left)
         return;
     file_date(f[4], date, sizeof date);
     upper_name(f[0], user, sizeof user);
-    put_text(p, left, "%d\t%d\t%s\t%s\t%d\t%d\n", atoi(f[2]), atoi(f[5]), date, user, atoi(f[6]), atoi(f[9]));
+    put_text(p, left, "%d\t%d\t%s\t%s\t%d\t%d\t%s\n", atoi(f[2]), atoi(f[5]), date, user, atoi(f[6]), atoi(f[9]),
+             f[4]);                     /* (the best run's replay: SpeedrunReplay) */
 }
 
 int32_t UnitedRecords_SpeedrunBoard(int32_t style, int32_t target, char *out, uint32_t cap)
@@ -691,6 +692,35 @@ int32_t UnitedRecords_GaloreDownload(const char *user, const char *file, unsigne
     Https_Escape(user, u, sizeof u);
     Https_Escape(file, f, sizeof f);
     snprintf(url, sizeof url, "%s/highlights/%s/%s", PROJECT_RECORDS_API, u, f);
+    if (!get(url, &r))
+        return 0;
+    *data = (unsigned char *)malloc(r.length ? r.length : 1);
+    if (*data) {
+        memcpy(*data, r.body, r.length);
+        *size = r.length;
+    }
+    Https_Free(&r);
+    return *data != NULL;
+}
+
+int32_t UnitedRecords_SpeedrunReplay(const char *file, unsigned char **data, uint32_t *size)
+{
+    char url[640], name[200], f[300];
+    size_t n = 0;
+    HttpsReply r;
+    *data = NULL;
+    *size = 0;
+    /* SWOS 2020's downloadReplayFileEx: the name in lower case, ".rpl" for ".7z" */
+    for (; file[n] && n + 4 < sizeof name; n++)
+        name[n] = (char)(file[n] >= 'A' && file[n] <= 'Z' ? file[n] + 32 : file[n]);
+    name[n] = 0;
+    if (n >= 4 && !strcmp(name + n - 4, ".rpl"))
+        name[n - 4] = 0;
+    else if (!n)
+        return 0;
+    strcat(name, ".7z");
+    Https_Escape(name, f, sizeof f);
+    snprintf(url, sizeof url, "%s/replays/%s", PROJECT_RECORDS_API, f);
     if (!get(url, &r))
         return 0;
     *data = (unsigned char *)malloc(r.length ? r.length : 1);

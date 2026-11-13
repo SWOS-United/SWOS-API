@@ -63,7 +63,7 @@ int32_t UnitedRecords_SpeedrunRun(const UnitedSpeedrun *run, char *line, uint32_
  * a time is its FRAMES at the style's rate, 99999 none; a date YY.MM.DD, from the replay's file
  * name). 1 fetched, 0 not.
  *   Board  (make_leaderboards_v3: a target's five difficulties, 100 places each)
- *          "<difficulty>\t<rank>\t<date>\t<user>\t<played>\t<best frames>"
+ *          "<difficulty>\t<rank>\t<date>\t<user>\t<played>\t<best frames>\t<best run's replay file>"
  *   Mine   (view_rows_v2: the player's records at a style)
  *          "<target>\t<difficulty>\t<played>\t<best frames>\t<last frames>\t<rank>"
  *   News   (view_news_current_v2: the latest runs, everybody's)
@@ -71,6 +71,10 @@ int32_t UnitedRecords_SpeedrunRun(const UnitedSpeedrun *run, char *line, uint32_
 int32_t UnitedRecords_SpeedrunBoard(int32_t style, int32_t target, char *out, uint32_t cap);
 int32_t UnitedRecords_SpeedrunMine(const char *user, int32_t style, char *out, uint32_t cap);
 int32_t UnitedRecords_SpeedrunNews(char *out, uint32_t cap);
+/* A board's run, as SWOS 2020 played it from LEADERBOARD (downloadReplayFileEx): its replay file
+ * (the board's last field, "....RPL") from the site's replays/, a .7z holding that .RPL -- the
+ * .7z's bytes into *data (malloc'd: free it). 1 done, 0 not. */
+int32_t UnitedRecords_SpeedrunReplay(const char *file, unsigned char **data, uint32_t *size);
 
 /* ---- the shared custom challenges (SWOS 2020's .SCN: a 7z of challenge.ini and two .TEAM) ----
  * List: list_scn_files, "<file>" a line ("ARGENTINA 3-0 BENIN BY BEVEREN.SCN"), by date (newest
