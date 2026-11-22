@@ -1,0 +1,25 @@
+# swos2020/highlights/ -- SWOS GALORE's shared highlights (<player>/<file>.HIL): files to download,
+# never anything that runs. (Apache 2.4. On nginx: serve it statically, pass only upload_hil.php
+# to PHP.) It holds for the players' folders below too.
+
+Options -Indexes -ExecCGI
+
+# No script here runs or is served -- whatever the old, open upload_hil.php may have let in --
+# except upload_hil.php itself.
+<FilesMatch "\.(php[0-9]?|phtml|pht|phar|inc|pl|py|cgi|sh|shtml|asp|aspx|jsp|htaccess|htpasswd|ini|log)$">
+    Require all denied
+</FilesMatch>
+<Files "upload_hil.php">
+    Require all granted
+</Files>
+
+# The highlights: bytes to save, never shown or sniffed as a page.
+<FilesMatch "\.(hil|HIL|txt|TXT)$">
+    ForceType application/octet-stream
+    <IfModule mod_headers.c>
+        Header set Content-Disposition "attachment"
+        Header set X-Content-Type-Options "nosniff"
+    </IfModule>
+</FilesMatch>
+
+LimitRequestBody 5242880

@@ -35,6 +35,10 @@ enum {
  * (reply->status says what it was), else the HTTPS_E* in reply->status too. */
 int32_t Https_Request(const char *url, const char *form, HttpsReply *reply);
 void    Https_Free(HttpsReply *reply);
+/* A file POSTed as a form's file field (multipart/form-data: `field`, `filename`, data[size] --
+ * any bytes), as `curl --form field=@file url` sends it. As Https_Request. */
+int32_t Https_Upload(const char *url, const char *field, const char *filename, const void *data, uint32_t size,
+                     HttpsReply *reply);
 
 /* A form value, percent-encoded (RFC 3986's unreserved left as they are) into out[cap]. */
 void    Https_Escape(const char *in, char *out, uint32_t cap);

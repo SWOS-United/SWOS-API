@@ -1,0 +1,26 @@
+# swos2020/replays/ -- the speedruns' replays: files to download, never anything that runs.
+# (Apache 2.4. On nginx: serve this folder statically, and pass only upload.php to PHP.)
+
+Options -Indexes -ExecCGI
+
+# No script here runs or is served -- whatever the old, open upload.php may have let in --
+# except upload.php itself.
+<FilesMatch "\.(php[0-9]?|phtml|pht|phar|inc|pl|py|cgi|sh|shtml|asp|aspx|jsp|htaccess|htpasswd|ini|log)$">
+    Require all denied
+</FilesMatch>
+<Files "upload.php">
+    Require all granted
+</Files>
+
+# The replays: bytes to save, never shown or sniffed as a page.
+<FilesMatch "\.(srp|7z|rpl|idx)$">
+    ForceType application/octet-stream
+    <IfModule mod_headers.c>
+        Header set Content-Disposition "attachment"
+        Header set X-Content-Type-Options "nosniff"
+    </IfModule>
+</FilesMatch>
+
+# The upload's own limit, a little over upload.php's 4 MB (php.ini's upload_max_filesize and
+# post_max_size must allow at least this much too).
+LimitRequestBody 5242880

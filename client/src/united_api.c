@@ -289,7 +289,10 @@ static char    s_apiKey[80];            /* (the new site's, for this session) */
 static int32_t s_checking;
 
 int32_t     United_UserId(void)           { return s_userId; }
-const char *United_UserName(void)         { return s_user; }
+/* The logged-in player's name; "" until the site has accepted the log-in, and after a refusal or a
+ * wrong password (s_user keeps what was typed, for the log lines) -- so nothing is sent or shown as
+ * theirs on a log-in that did not happen. */
+const char *United_UserName(void)         { return s_userId > 0 ? s_user : ""; }
 const char *United_Password(void)         { return s_password; }
 const char *United_ApiKey(void)           { return s_apiKey; }
 const char *United_LoginError(void)       { return s_error; }

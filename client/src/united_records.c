@@ -291,7 +291,12 @@ int32_t UnitedRecords_ChallengeWon(const char *user, const char *scenario, const
 
 /* ---- the speedruns (swosapi_v3) ---- */
 
-typedef struct { int32_t found, played, ranking, bStop, bElaps; double best, current; } RunRow;
+typedef struct {
+    int32_t found, played, ranking, bStop, bElaps;
+    double  best, current;
+    char    bestFile[96];       /* the best run's replay on the site, "" none */
+    char    currentFile[96];    /* the last run's */
+} RunRow;
 
 /* The player's row for (mode, difficulty) in a view_rows_v2 answer: "user, mode, difficulty,
  * played, best, current, ranking, bestFile, currentFile, bStart, bStop, bElaps, cStart, cStop,
@@ -323,6 +328,8 @@ static RunRow find_row(const char *body, int32_t mode, int32_t difficulty)
             row.ranking = atoi(f[6]);
             row.bStop = atoi(f[10]);
             row.bElaps = atoi(f[11]);
+            snprintf(row.bestFile, sizeof row.bestFile, "%s", strcmp(f[7], "none") ? f[7] : "");
+            snprintf(row.currentFile, sizeof row.currentFile, "%s", strcmp(f[8], "none") ? f[8] : "");
             return row;
         }
         line = next ? next + 1 : NULL;
@@ -345,16 +352,46 @@ static RunRow view_row(const char *user, int32_t style, int32_t mode, int32_t di
     return row;
 }
 
+static int32_t ends_with(const char *s, const char *tail)
+{
+    const size_t n = strlen(s), t = strlen(tail);
+    return n >= t && !strcmp(s + n - t, tail);
+}
+
+/* A run's replay off the site, once no record names it: only this game's (.srp) -- SWOS 2020's
+ * .7z are left as SWOS 2020 left them (its delete named the .rpl, which was never there). */
+static void delete_replay(const char *file)
+{
+    char url[512], f[300];
+    HttpsReply r;
+    if (!file[0] || !ends_with(file, ".srp") || strchr(file, '/') || strchr(file, '\\') || strstr(file, ".."))
+        return;
+    Https_Escape(file, f, sizeof f);
+    snprintf(url, sizeof url, "%s/swosapi_v3.php?conn_mode=1&option=delete_replay_file&filename=%s", PROJECT_RECORDS_API, f);
+    if (get(url, &r))
+        Https_Free(&r);
+}
+
 int32_t UnitedRecords_SpeedrunRun(const UnitedSpeedrun *run, char *line, uint32_t cap)
 {
-    char url[1024], user[160];
+    char url[1024], user[160], bestFile[200], currentFile[200], uploaded[96] = "";
     HttpsReply r;
     if (line && cap)
         line[0] = 0;
-    if (run->mode < 0 || run->mode > 7 || run->difficulty < 0 || run->difficulty > 4)
-        return 0;
+    if (!run->done || run->mode < 0 || run->mode > 7 || run->difficulty < 0 || run->difficulty > 4)
+        return 0;               /* (SWOS 2020 sent a run only when it reached its target) */
     Https_Escape(run->user, user, sizeof user);
     const RunRow old = view_row(user, run->style, run->mode, run->difficulty);
+    /* the run's replay first (SWOS 2020's uploadReplayFile: the site's replays/upload.php), so the
+     * record names a file that is there */
+    if (run->replay && run->replaySize && run->replayName && run->replayName[0]) {
+        snprintf(url, sizeof url, "%s/replays/upload.php", PROJECT_RECORDS_API);
+        if (Https_Upload(url, "myFile", run->replayName, run->replay, run->replaySize, &r) == 0) {
+            if (r.status == 200)
+                snprintf(uploaded, sizeof uploaded, "%s", run->replayName);
+            Https_Free(&r);
+        }
+    }
     /* the record as SWOS 2020 keeps it: plays, the best and the last time (seconds), and their
      * frames -- from kick-off to the target (start 0) */
     const double now = run->done ? run->ms / 1000.0 : old.current;
@@ -362,17 +399,29 @@ int32_t UnitedRecords_SpeedrunRun(const UnitedSpeedrun *run, char *line, uint32_
     const double best = better ? now : old.best;
     const int32_t bStop = better ? run->frames : old.bStop, bElaps = better ? run->frames : old.bElaps;
     const int32_t cStop = run->done ? run->frames : 0;
+    /* the run's replay is the last run's, and the best's when it is the best; else the best keeps
+     * its own */
+    const char *const newBest = better ? uploaded : old.bestFile;
+    Https_Escape(newBest, bestFile, sizeof bestFile);
+    Https_Escape(uploaded, currentFile, sizeof currentFile);
     snprintf(url, sizeof url,
              "%s/swosapi_v3.php?conn_mode=1&option=sync_row_v3&username=%s&game_style=%d&game_mode=%d"
-             "&difficulty=%d&played=%d&best_record=%.3f&current_record=%.3f&best_replay_filename="
-             "&current_replay_filename=&best_record_frame_start=0&best_record_frame_stop=%d"
+             "&difficulty=%d&played=%d&best_record=%.3f&current_record=%.3f&best_replay_filename=%s"
+             "&current_replay_filename=%s&best_record_frame_start=0&best_record_frame_stop=%d"
              "&best_record_frame_elaps=%d&current_record_frame_start=0&current_record_frame_stop=%d"
              "&current_record_frame_elaps=%d",
              PROJECT_RECORDS_API, user, (int)run->style, (int)run->mode, (int)run->difficulty,
-             (int)(old.played + 1), best, now, (int)bStop, (int)bElaps, (int)cStop, (int)cStop);
+             (int)(old.played + 1), best, now, bestFile, currentFile, (int)bStop, (int)bElaps, (int)cStop, (int)cStop);
     if (!get(url, &r))
         return 0;
     Https_Free(&r);
+    /* the replays no record names any more (SWOS 2020's saveRecordData: the old best when it was
+     * beaten, the old last run when it was not the best) */
+    if (strcmp(old.bestFile, newBest) != 0 && strcmp(old.bestFile, uploaded) != 0)
+        delete_replay(old.bestFile);
+    if (strcmp(old.currentFile, old.bestFile) != 0 && strcmp(old.currentFile, newBest) != 0 &&
+        strcmp(old.currentFile, uploaded) != 0)
+        delete_replay(old.currentFile);
     /* the line: the player's rank now, and the board's best */
     const int32_t rank = view_row(user, run->style, run->mode, run->difficulty).ranking;
     char top[64] = "";
@@ -510,8 +559,8 @@ int32_t UnitedRecords_SpeedrunBoard(int32_t style, int32_t target, char *out, ui
 static void mine_row(char **f, int32_t n, char **p, uint32_t *left)
 {
     (void)n;
-    put_text(p, left, "%d\t%d\t%d\t%d\t%d\t%d\n", atoi(f[1]), atoi(f[2]), atoi(f[3]), atoi(f[11]), atoi(f[14]),
-             atoi(f[6]));
+    put_text(p, left, "%d\t%d\t%d\t%d\t%d\t%d\t%s\t%s\n", atoi(f[1]), atoi(f[2]), atoi(f[3]), atoi(f[11]),
+             atoi(f[14]), atoi(f[6]), strcmp(f[7], "none") ? f[7] : "", strcmp(f[8], "none") ? f[8] : "");
 }
 
 int32_t UnitedRecords_SpeedrunMine(const char *user, int32_t style, char *out, uint32_t cap)
@@ -536,8 +585,9 @@ static void news_row(char **f, int32_t n, char **p, uint32_t *left)
         snprintf(rank, sizeof rank, "%d", atoi(f[7]));
     else
         snprintf(rank, sizeof rank, "X");
-    put_text(p, left, "%s\t%d\t%d\t%d\t%s\t%d\t%s\n", date, atoi(f[0]), atoi(f[2]), atoi(f[3]), user, atoi(f[10]),
-             rank);
+    put_text(p, left, "%s\t%d\t%d\t%d\t%s\t%d\t%s\t%s\n", date, atoi(f[0]), atoi(f[2]), atoi(f[3]), user,
+             atoi(f[10]), rank, strcmp(f[9], "none") ? f[9] : "");   /* (the run's replay: SWOS 2020's
+                                                                         * bestNewsMenu_OnSelect) */
 }
 
 int32_t UnitedRecords_SpeedrunNews(char *out, uint32_t cap)
@@ -683,6 +733,141 @@ int32_t UnitedRecords_GaloreChart(const char *yearMonth, char *out, uint32_t cap
     return 1;
 }
 
+/* "user, file, "note", datetime, scene, 0" (download_all_hil_data / download_hil_data) as
+ * "user\tfile\tnote\tdatetime\tscene" lines; the note "" when SWOS 2020 stored its "%0" */
+static int32_t hil_rows(const char *url, char *out, uint32_t cap)
+{
+    HttpsReply r;
+    char *p = out;
+    uint32_t left = cap;
+    if (cap)
+        out[0] = 0;
+    if (!get(url, &r))
+        return 0;
+    for (char *line = r.body; line && *line;) {
+        char *next = strchr(line, '\n');
+        if (next)
+            *next++ = 0;
+        char *q1 = strchr(line, '"'), *q2 = q1 ? strrchr(line, '"') : NULL;
+        if (q1 && q2 > q1) {
+            char *head[3], *tail[3], note[260];
+            *q1 = 0;
+            *q2 = 0;
+            snprintf(note, sizeof note, "%s", strcmp(q1 + 1, "%0") ? q1 + 1 : "");
+            for (char *c = note; *c; c++)
+                if (*c == '\t' || *c == '\r')
+                    *c = ' ';
+            const int32_t nh = split_fields(line, head, 3);         /* user, file, "" */
+            char *rest = q2 + 1;
+            while (*rest == ',' || *rest == ' ')
+                rest++;
+            const int32_t nt = split_fields(rest, tail, 3);         /* datetime, scene, 0 */
+            if (nh >= 2 && nt >= 2) {
+                for (char *c = head[1]; *c; c++)
+                    if (*c == ',')
+                        *c = 0;
+                put_text(&p, &left, "%s\t%s\t%s\t%s\t%d\n", head[0], head[1], note, tail[0], atoi(tail[1]));
+            }
+        }
+        line = next;
+    }
+    Https_Free(&r);
+    return 1;
+}
+
+int32_t UnitedRecords_GaloreAll(char *out, uint32_t cap)
+{
+    char url[256];
+    snprintf(url, sizeof url, "%s/galoreapi_v15.php?conn_mode=1&option=download_all_hil_data", PROJECT_RECORDS_API);
+    return hil_rows(url, out, cap);
+}
+
+int32_t UnitedRecords_GaloreShared(const char *user, char *out, uint32_t cap)
+{
+    char url[512], u[160];
+    Https_Escape(user, u, sizeof u);
+    snprintf(url, sizeof url, "%s/galoreapi_v15.php?conn_mode=1&option=download_hil_data&username=%s",
+             PROJECT_RECORDS_API, u);
+    return hil_rows(url, out, cap);
+}
+
+static void rater_row(char **f, int32_t n, char **p, uint32_t *left)
+{
+    (void)n;
+    put_text(p, left, "%s\t%s\t%s\n", f[1], f[2], f[3]);       /* (f[0]: the rater) */
+}
+
+int32_t UnitedRecords_GaloreRatings(const char *rater, char *out, uint32_t cap)
+{
+    char url[512], u[160];
+    Https_Escape(rater, u, sizeof u);
+    snprintf(url, sizeof url, "%s/galoreapi_v15.php?conn_mode=1&option=download_all_rater_data&ratername=%s",
+             PROJECT_RECORDS_API, u);
+    return each_row(url, 4, rater_row, out, cap);
+}
+
+int32_t UnitedRecords_GaloreRate(const char *rater, const char *user, const char *file, double rate)
+{
+    char url[768], r[160], u[160], f[300];
+    HttpsReply reply;
+    Https_Escape(rater, r, sizeof r);
+    Https_Escape(user, u, sizeof u);
+    Https_Escape(file, f, sizeof f);
+    if (rate > 0.0)         /* (upsert_rater_data sets the highlight's average too) */
+        snprintf(url, sizeof url,
+                 "%s/galoreapi_v15.php?conn_mode=1&option=upsert_rater_data&ratername=%s&username=%s&filename=%s&rate=%.1f",
+                 PROJECT_RECORDS_API, r, u, f, rate);
+    else                    /* (update_avg_rate_data: the rating taken away, the average again) */
+        snprintf(url, sizeof url,
+                 "%s/galoreapi_v15.php?conn_mode=1&option=update_avg_rate_data&ratername=%s&username=%s&filename=%s",
+                 PROJECT_RECORDS_API, r, u, f);
+    if (!get(url, &reply))
+        return 0;
+    Https_Free(&reply);
+    return 1;
+}
+
+int32_t UnitedRecords_GaloreShare(const char *user, const char *file, const char *note, const char *datetime,
+                                  int32_t scene, const void *data, uint32_t size)
+{
+    char url[1024], u[160], f[300], n[600], d[64];
+    HttpsReply r;
+    Https_Escape(user, u, sizeof u);
+    Https_Escape(file, f, sizeof f);
+    Https_Escape(note, n, sizeof n);
+    Https_Escape(datetime, d, sizeof d);
+    snprintf(url, sizeof url,
+             "%s/galoreapi_v15.php?conn_mode=1&option=upsert_hil_data&username=%s&filename=%s&note=%s&datetime=%s&scene=%d",
+             PROJECT_RECORDS_API, u, f, n, d, (int)scene);
+    if (!get(url, &r))
+        return 0;
+    Https_Free(&r);
+    if (data && size) {     /* (SWOS 2020's uploadHilFile: highlights/upload_hil.php?username=) */
+        snprintf(url, sizeof url, "%s/highlights/upload_hil.php?username=%s", PROJECT_RECORDS_API, u);
+        if (Https_Upload(url, "myFile", file, data, size, &r) != 0)
+            return 0;
+        const int32_t ok = r.status == 200 || r.status == 409;     /* (409: the file is there already --
+                                                                     * shared before, its row deleted) */
+        Https_Free(&r);
+        return ok;
+    }
+    return 1;
+}
+
+int32_t UnitedRecords_GaloreUnshare(const char *user, const char *file)
+{
+    char url[768], u[160], f[300];
+    HttpsReply r;
+    Https_Escape(user, u, sizeof u);
+    Https_Escape(file, f, sizeof f);
+    snprintf(url, sizeof url, "%s/galoreapi_v15.php?conn_mode=1&option=delete_hil_data&username=%s&filename=%s",
+             PROJECT_RECORDS_API, u, f);
+    if (!get(url, &r))
+        return 0;
+    Https_Free(&r);
+    return 1;
+}
+
 int32_t UnitedRecords_GaloreDownload(const char *user, const char *file, unsigned char **data, uint32_t *size)
 {
     char url[640], u[160], f[300];
@@ -710,6 +895,13 @@ int32_t UnitedRecords_SpeedrunReplay(const char *file, unsigned char **data, uin
     HttpsReply r;
     *data = NULL;
     *size = 0;
+    if (ends_with(file, ".srp")) {      /* (this game's: on the site as it was sent) */
+        if (strlen(file) >= sizeof name)
+            return 0;
+        snprintf(name, sizeof name, "%s", file);
+        n = strlen(name);
+        goto fetch;
+    }
     /* SWOS 2020's downloadReplayFileEx: the name in lower case, ".rpl" for ".7z" */
     for (; file[n] && n + 4 < sizeof name; n++)
         name[n] = (char)(file[n] >= 'A' && file[n] <= 'Z' ? file[n] + 32 : file[n]);
@@ -719,6 +911,7 @@ int32_t UnitedRecords_SpeedrunReplay(const char *file, unsigned char **data, uin
     else if (!n)
         return 0;
     strcat(name, ".7z");
+fetch:
     Https_Escape(name, f, sizeof f);
     snprintf(url, sizeof url, "%s/replays/%s", PROJECT_RECORDS_API, f);
     if (!get(url, &r))

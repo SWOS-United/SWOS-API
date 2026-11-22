@@ -164,8 +164,23 @@ static uint32_t dechunk(char *body, uint32_t len)
     return (uint32_t)(out - body);
 }
 
-static int32_t one_request(const char *url, const char *form, HttpsReply *reply, char *location,
-                           uint32_t locationCap)
+/* One request: GET (body NULL), or POST of body[bodyLen] as `type` -- any bytes (a file's). */
+static int32_t ssl_write_all(mbedtls_ssl_context *ssl, const unsigned char *p, size_t left)
+{
+    while (left > 0) {
+        int r = mbedtls_ssl_write(ssl, p, left);
+        if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE)
+            continue;
+        if (r <= 0)
+            return -1;
+        p += r;
+        left -= (size_t)r;
+    }
+    return 0;
+}
+
+static int32_t one_request(const char *url, const char *body, uint32_t bodyLen, const char *type, HttpsReply *reply,
+                           char *location, uint32_t locationCap)
 {
     char host[256], port[8], *req = NULL, *raw = NULL;
     const char *path;
@@ -223,32 +238,21 @@ static int32_t one_request(const char *url, const char *form, HttpsReply *reply,
         }
     }
 
-    reqLen = (uint32_t)(strlen(path) + strlen(host) + (form ? strlen(form) : 0) + 512);
+    reqLen = (uint32_t)(strlen(path) + strlen(host) + (type ? strlen(type) : 0) + 512);
     req = (char *)malloc(reqLen);
     if (!req)
         goto done;
-    if (form)
+    if (body)
         snprintf(req, reqLen, "POST %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nConnection: close\r\n"
-                 "Content-Type: %s\r\nContent-Length: %u\r\n\r\n%s",
-                 path, host, kUserAgent, form[0] == '{' ? "application/json" : "application/x-www-form-urlencoded",
-                 (unsigned)strlen(form), form);
+                 "Content-Type: %s\r\nContent-Length: %u\r\n\r\n",
+                 path, host, kUserAgent, type, (unsigned)bodyLen);
     else
         snprintf(req, reqLen, "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nConnection: close\r\n\r\n",
                  path, host, kUserAgent);
-    {
-        const unsigned char *p = (const unsigned char *)req;
-        size_t left = strlen(req);
-        while (left > 0) {
-            r = mbedtls_ssl_write(&ssl, p, left);
-            if (r == MBEDTLS_ERR_SSL_WANT_READ || r == MBEDTLS_ERR_SSL_WANT_WRITE)
-                continue;
-            if (r <= 0) {
-                ret = HTTPS_ENET;
-                goto done;
-            }
-            p += r;
-            left -= (size_t)r;
-        }
+    if (ssl_write_all(&ssl, (const unsigned char *)req, strlen(req)) != 0 ||
+        (body && ssl_write_all(&ssl, (const unsigned char *)body, bodyLen) != 0)) {
+        ret = HTTPS_ENET;
+        goto done;
     }
     if (read_all(&ssl, &raw, &rawLen) != 0) {
         ret = HTTPS_ENET;
@@ -287,7 +291,46 @@ done:
     return ret;
 }
 
+static int32_t request(const char *url, const char *body, uint32_t bodyLen, const char *type, HttpsReply *reply);
+
 int32_t Https_Request(const char *url, const char *form, HttpsReply *reply)
+{
+    return request(url, form, form ? (uint32_t)strlen(form) : 0,
+                   form ? (form[0] == '{' ? "application/json" : "application/x-www-form-urlencoded") : NULL, reply);
+}
+
+int32_t Https_Upload(const char *url, const char *field, const char *filename, const void *data, uint32_t size,
+                     HttpsReply *reply)
+{
+    static const char kBoundary[] = "----SwosUnitedUpload7d3f9a2c";
+    char head[512], type[96];
+    const char tail[] = "\r\n------SwosUnitedUpload7d3f9a2c--\r\n";
+    int32_t r;
+    const int n = snprintf(head, sizeof head,
+                           "--%s\r\nContent-Disposition: form-data; name=\"%s\"; filename=\"%s\"\r\n"
+                           "Content-Type: application/octet-stream\r\n\r\n", kBoundary, field, filename);
+    if (n <= 0 || (size_t)n >= sizeof head || strpbrk(field, "\"\r\n") || strpbrk(filename, "\"\r\n")) {
+        memset(reply, 0, sizeof *reply);
+        reply->status = HTTPS_EPROTO;
+        return HTTPS_EPROTO;
+    }
+    const uint32_t total = (uint32_t)n + size + (uint32_t)(sizeof tail - 1);
+    char *body = (char *)malloc(total);
+    if (!body) {
+        memset(reply, 0, sizeof *reply);
+        reply->status = HTTPS_EPROTO;
+        return HTTPS_EPROTO;
+    }
+    memcpy(body, head, (size_t)n);
+    memcpy(body + n, data, size);
+    memcpy(body + n + size, tail, sizeof tail - 1);
+    snprintf(type, sizeof type, "multipart/form-data; boundary=%s", kBoundary);
+    r = request(url, body, total, type, reply);
+    free(body);
+    return r;
+}
+
+static int32_t request(const char *url, const char *body, uint32_t bodyLen, const char *type, HttpsReply *reply)
 {
     static int32_t psaReady;
     char current[1024], location[1024];
@@ -304,7 +347,7 @@ int32_t Https_Request(const char *url, const char *form, HttpsReply *reply)
     snprintf(current, sizeof current, "%s", url);
     for (hop = 0; hop <= MAX_REDIRECTS; hop++) {
         Https_Free(reply);
-        r = one_request(current, form, reply, location, sizeof location);
+        r = one_request(current, body, bodyLen, type, reply, location, sizeof location);
         if (r != 0) {
             reply->status = r;
             return r;
@@ -323,7 +366,7 @@ int32_t Https_Request(const char *url, const char *form, HttpsReply *reply)
         } else {
             return 0;                           /* (not https: not followed) */
         }
-        form = NULL;                            /* (a redirect is fetched with GET) */
+        body = NULL;                            /* (a redirect is fetched with GET) */
     }
     return r;
 }
