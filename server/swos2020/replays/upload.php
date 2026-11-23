@@ -22,7 +22,7 @@ declare(strict_types=1);
 const MAX_BYTES   = 4 * 1024 * 1024;   /* a speedrun's .SRP is ~50 KB, a whole match's ~1 MB */
 const RATE_MAX    = 30;                /* uploads an address may make ... */
 const RATE_WINDOW = 3600;              /* ... in this many seconds */
-const NAME_RE     = '/\A[A-Za-z0-9_^][A-Za-z0-9_.^-]{0,39}-\d{4}-\d{4}-\d{6}-auto\.(srp|7z)\z/';
+const NAME_RE     = '/\A(?!\.)[^\/\\\\\x00-\x1f\x7f]{1,40}-\d{4}-\d{4}-\d{6}-auto\.(srp|7z)\z/';   /* any player's name: no folder (/ \), no leading dot, no .. */
 
 header('Content-Type: text/plain; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
@@ -76,7 +76,7 @@ if ($size === false || $size <= 0 || $size > MAX_BYTES)
     fail(413, 'too large');
 
 $name = (string)$f['name'];
-if (!preg_match(NAME_RE, $name, $m))
+if (!preg_match(NAME_RE, $name, $m) || strpos($name, '..') !== false)
     fail(400, 'not a replay name');
 $magic = $m[1] === 'srp' ? 'SWRP' : "7z\xBC\xAF\x27\x1C";
 $head = file_get_contents($f['tmp_name'], false, null, 0, strlen($magic));

@@ -6,7 +6,8 @@
  * SWOS 2020's upload_hil.php took the folder from ?username= as it came -- "../" and all -- and
  * stored any file, any name, over any other. This one stores a file only when:
  *   - it is a POST with one file in "myFile", uploaded whole, at most MAX_BYTES;
- *   - the player's name is a name (letters, digits, space _ . ^ -; no "..", no leading dot);
+ *   - the player's name is a name: any printable characters (SWOS 2020's players have spaces, # @ ! $ *
+ *     in theirs) but no folder in it -- no / or \, no "..", no leading dot;
  *   - the file's name is a highlight's ("<name>.HIL", the same characters and ( ));
  *   - its first bytes are a highlights file's: SWOS 2020's / the PC's (08 00 00 00), SWOS's own
  *     (00 00 00 0C) or SWOS United's (JSON, "{");
@@ -22,8 +23,8 @@ declare(strict_types=1);
 const MAX_BYTES   = 4 * 1024 * 1024;   /* SWOS 2020's ~600 KB, SWOS United's JSON ~1.2 MB for 10 scenes */
 const RATE_MAX    = 30;
 const RATE_WINDOW = 3600;
-const USER_RE     = '/\A[A-Za-z0-9_^-][A-Za-z0-9 _.^-]{0,39}\z/';
-const FILE_RE     = '/\A[A-Za-z0-9_^(-][A-Za-z0-9 _.^()-]{0,90}\.[Hh][Ii][Ll]\z/';
+const USER_RE     = '/\A(?!\.)[^\/\\\\\x00-\x1f\x7f]{1,40}\z/';   /* any player's name: no folder (/ \), no leading dot, no .. */
+const FILE_RE     = '/\A(?!\.)[^\/\\\\\x00-\x1f\x7f]{1,90}\.[Hh][Ii][Ll]\z/';
 
 header('Content-Type: text/plain; charset=utf-8');
 header('X-Content-Type-Options: nosniff');

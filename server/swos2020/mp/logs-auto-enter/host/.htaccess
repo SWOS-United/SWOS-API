@@ -1,0 +1,11 @@
+# swos2020/mp/logs-auto-enter/host/ -- multiplayer logs: files to download, never anything that runs.
+# Its upload script stored any file under any name, so a script uploaded here could have run;
+# none is allowed to now but the folder's own (upload_mp_logs_host.php index.php), its subfolders included.
+# (2026-11-22. Apache 2.4.)
+
+<FilesMatch "\.(php[0-9]?|phtml|pht|phar|inc|pl|py|cgi|sh|shtml|asp|aspx|jsp|htaccess|htpasswd)$">
+    Require all denied
+</FilesMatch>
+<FilesMatch "^(upload_mp_logs_host\.php|index\.php)$">
+    Require all granted
+</FilesMatch>

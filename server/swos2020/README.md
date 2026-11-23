@@ -12,6 +12,16 @@ by the game or by a script.
 | `delete_replay_file.php` | paste over `delete_replay_file()` in `swos2020/swosapi_v3.php` | the old one deleted any file the web server could write, for anyone |
 | `highlights/upload_hil.php` | `swos2020/highlights/upload_hil.php` | SWOS GALORE's SHARE: the old one took its folder from `?username=` as it came (`../` and all) and stored any file over any other |
 | `highlights/.htaccess` | `swos2020/highlights/.htaccess` | nothing in `highlights/` (or a player's folder in it) runs or is served as a script, except `upload_hil.php` |
+| `challenges/custom/.htaccess`, `mp/db/teams/.htaccess`, `mp/logs/{client,host}/.htaccess`, `mp/logs-auto-enter/{client,host}/.htaccess`, `tactics/.htaccess` | the same folders under `swos2020/` | SWOS 2020's other uploads (custom challenges, multiplayer teams and logs, tactics) store any file too: no script runs there but the folder's own upload script and `index.php` pages. Their upload scripts themselves are unchanged |
+
+**Names.** A player's name may hold any printable character -- 21 of the players on the server have
+spaces or `# @ ! $ * .` in theirs ("benja plays", "h0nz@", "AdamStan*81") -- but no folder: no `/` or
+`\\`, no `..`, no leading dot. (Checked against every replay and highlight on the server: all pass
+but one nameless `.HIL`.)
+
+**Deployed 2026-11-22** (benbaker76, by SFTP), each step checked over the web: replays and highlights
+still download, every folder's upload and index pages answer as before, a test script put in each
+protected folder is refused (403), the new uploads refuse a script, a non-replay and a second copy.
 
 SWOS 2020's game keeps working with all of them: it uploads `<name>.7z` and its highlights the same way, and its
 delete never found anything to delete.

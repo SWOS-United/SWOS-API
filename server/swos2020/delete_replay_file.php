@@ -18,7 +18,7 @@ function delete_replay_file()
     global $filename;
 
     $name = (string)$filename;
-    if (!preg_match('/\A[A-Za-z0-9_^][A-Za-z0-9_.^-]{0,39}-\d{4}-\d{4}-\d{6}-auto\.srp\z/', $name)) {
+    if (!preg_match('/\A(?!\.)[^\/\\\\\x00-\x1f\x7f]{1,40}-\d{4}-\d{4}-\d{6}-auto\.srp\z/', $name) || strpos($name, '..') !== false) {
         echo "Failed\n";
         return;
     }
