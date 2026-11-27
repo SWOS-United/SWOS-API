@@ -428,14 +428,14 @@ int32_t UnitedRecords_SpeedrunRun(const UnitedSpeedrun *run, char *line, uint32_
     snprintf(url, sizeof url,
              "%s/swosapi_v3.php?conn_mode=1&option=make_leaderboard_v2&game_style=%d&game_mode=%d&difficulty=%d",
              PROJECT_RECORDS_API, (int)run->style, (int)run->mode, (int)run->difficulty);
-    if (get(url, &r)) {     /* the first row: "<user>, mode, difficulty, played, <best>, ..." */
+    if (get(url, &r)) {     /* the first row: "<user>, mode, difficulty, <best>, file, rank, played" */
         const char *c1 = strstr(r.body, ", ");
         if (c1 && strncmp(r.body, "none,", 5) != 0) {
             char name[32];
             const int32_t nameLen = (int32_t)(c1 - r.body);
             snprintf(name, sizeof name, "%.*s", nameLen < 31 ? nameLen : 31, r.body);
             const char *p = c1;
-            for (int32_t k = 0; k < 3 && p; k++)
+            for (int32_t k = 0; k < 2 && p; k++)
                 p = strstr(p + 2, ", ");
             const double topBest = p ? atof(p + 2) : 0.0;
             for (char *c = name; *c; c++)
